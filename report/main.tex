@@ -1,0 +1,305 @@
+% MIT License
+%
+% Ankit Maurya
+% ankit.dp@bhu.ac.in
+%
+% Permission is hereby granted, free of charge, to any person obtaining a copy
+% of this software and associated documentation files (the "Software"), to deal
+% in the Software without restriction, including without limitation the rights
+% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+% copies of the Software, and to permit persons to whom the Software is
+% furnished to do so, subject to the following conditions:
+%
+% The above copyright notice and this permission notice shall be included in all
+% copies or substantial portions of the Software.
+%
+% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+% SOFTWARE.
+
+\documentclass[12pt,a4paper]{report}
+
+% Packages
+\usepackage{geometry}
+\usepackage{fancyhdr}
+\usepackage{setspace}
+\usepackage{titlesec}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{tikz}
+\usepackage[colorlinks=true,linkcolor=black,citecolor=blue!60!black,urlcolor=blue!60!black,linktoc=all]{hyperref}
+\usetikzlibrary{positioning,arrows.meta,calc,fit,backgrounds}
+
+% Set page margins
+\geometry{top=1in, bottom=1in, left=1in, right=1in}
+
+% Page numbering format
+\pagestyle{fancy}
+\fancyhf{}
+\rfoot{\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+% Chapter and Section formatting
+\titleformat{\chapter}[display]
+  {\normalfont\fontsize{14}{16}\selectfont\bfseries\centering}{\MakeUppercase{\chaptertitlename}\ \thechapter}{20pt}{\fontsize{14}{16}\selectfont\bfseries}
+\titleformat{\section}
+  {\normalfont\fontsize{12}{14}\selectfont\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}
+  {\normalfont\fontsize{12}{14}\selectfont\bfseries}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}
+  {\normalfont\fontsize{12}{14}\selectfont\bfseries}{\thesubsubsection}{1em}{}
+\titlespacing*{\chapter}{0pt}{-10pt}{22pt}
+
+% Table of Contents formatting
+\makeatletter
+\renewcommand*\l@chapter[2]{%
+  \ifnum \c@tocdepth >\m@ne
+    \addpenalty{-\@highpenalty}%
+    \vskip 1.0em \@plus\p@
+    \setlength\@tempdima{1.5em}%
+    \begingroup
+      \parindent \z@ \rightskip \@pnumwidth
+      \parfillskip -\@pnumwidth
+      \leavevmode \bfseries
+      \advance\leftskip\@tempdima
+      \hskip -\leftskip
+      #1\nobreak\hfil \nobreak\hb@xt@\@pnumwidth{\hss #2}\par
+      \penalty\@highpenalty
+    \endgroup
+  \fi}
+
+\renewcommand*\l@section{\@dottedtocline{1}{0em}{2.3em}}
+\renewcommand*\l@subsection{\@dottedtocline{2}{2.3em}{3.2em}}
+\renewcommand*\l@subsubsection{\@dottedtocline{3}{5.5em}{4.1em}}
+\renewcommand*\l@paragraph{\@dottedtocline{4}{8.6em}{5em}}
+\renewcommand*\l@subparagraph{\@dottedtocline{5}{12em}{6em}}
+\makeatother
+
+% ------------------------------------------------------------------
+% Project-specific definitions
+% ------------------------------------------------------------------
+\definecolor{tealfill}{HTML}{DDF1EE}   \definecolor{tealline}{HTML}{0F766E}
+\definecolor{purplefill}{HTML}{E8E1F8} \definecolor{purpleline}{HTML}{6D4AC4}
+\definecolor{coralfill}{HTML}{FBE3DF}  \definecolor{coralline}{HTML}{C8472B}
+\definecolor{grayfill}{HTML}{EEF1F4}   \definecolor{grayline}{HTML}{64748B}
+
+\tikzset{
+  tbox/.style={draw=tealline,   fill=tealfill,   rounded corners=2pt, align=center, font=\small, text width=6.0cm, minimum height=0.95cm, inner sep=3pt},
+  pbox/.style={draw=purpleline, fill=purplefill, rounded corners=2pt, align=center, font=\small, text width=6.0cm, minimum height=0.95cm, inner sep=3pt},
+  cbox/.style={draw=coralline,  fill=coralfill,  rounded corners=2pt, align=center, font=\small, text width=6.0cm, minimum height=0.95cm, inner sep=3pt},
+  gbox/.style={draw=grayline,   fill=grayfill,   rounded corners=2pt, align=center, font=\small, text width=6.0cm, minimum height=0.95cm, inner sep=3pt},
+  flow/.style={-{Stealth[length=2.4mm]}, thick, color=grayline}
+}
+
+% Highlighted placeholder for values that must be filled in after the experiments are run
+\newcommand{\tbd}[1]{\colorbox{yellow}{\textbf{[#1]}}}
+
+% Include a figure if the image file exists, otherwise show a labelled placeholder frame
+\newcommand{\maybefigure}[4]{% file, width, height of placeholder, description
+  \IfFileExists{figures/#1}{\includegraphics[width=#2]{figures/#1}}{%
+    \fbox{\parbox[c][#3][c]{0.92\textwidth}{\centering\textbf{[Insert figure]}\\[2pt] \small #4\\[2pt]
+    \footnotesize Save it from the notebook as \texttt{\detokenize{figures/#1}} and recompile.}}}}
+
+% Values produced by make_results_table.py (placeholders until results.csv exists)
+\input{tables/summary_macros}
+
+% Code listings
+\lstset{
+  language=Python, basicstyle=\ttfamily\footnotesize, keywordstyle=\bfseries, commentstyle=\itshape\color{grayline},
+  stringstyle=\color{coralline}, breaklines=true, frame=single, framerule=0.3pt, rulecolor=\color{grayline},
+  backgroundcolor=\color{grayfill!60}, xleftmargin=2pt, xrightmargin=2pt, aboveskip=8pt, belowskip=4pt,
+  columns=fullflexible, keepspaces=true, showstringspaces=false
+}
+\captionsetup{font=small, labelfont=bf, skip=6pt}
+% let floats fill pages instead of leaving white space
+\renewcommand{\topfraction}{0.95}\renewcommand{\bottomfraction}{0.95}
+\renewcommand{\textfraction}{0.05}\renewcommand{\floatpagefraction}{0.8}
+\setcounter{topnumber}{3}\setcounter{bottomnumber}{3}\setcounter{totalnumber}{5}
+\raggedbottom
+
+% Title Page
+\begin{document}
+\begin{titlepage}
+    \centering
+
+    % Title
+    {\Huge \bfseries{Stock Trend Prediction using Machine Learning}\par}
+    \vspace{1cm}
+    {\large A report submitted in partial fulfillment of the requirements for\par}
+    {\large\itshape the subject of Machine Learning\par}
+    \vspace{1cm}
+    {\Large\bfseries B.Tech in Computer Science and Engineering\par}  % Uncomment this for MCA
+    % {\Large\bfseries Master of Science\par}   % Uncomment this for M.sc
+    \vspace{1cm}
+    {\large by\par}
+    \vspace{1cm}
+    {\Large\bfseries Kundan Kumar (SIC-24BCSG85, Roll-6)\par}
+    \vspace{0.2cm}
+    {\Large\bfseries Soham Mohanty (SIC-24BCSD49, Roll-3)\par}
+    \vspace{0.2cm}
+    {\Large\bfseries Priyanshu Sekhar Badhei (SIC-24BCSF35, Roll-4)\par}
+    \vspace{0.2cm}
+    {\Large\bfseries Naman Verma (SIC-24BCSF15, Roll-2)\par}
+    \vspace{0.2cm}
+    {\Large\bfseries Tejash Arya (SIC-24BCSG63, Roll-15)\par}
+    \vspace{1cm}
+    % University Logo
+    \includegraphics[width=0.4\textwidth]{silicon_university_logo.png}\\
+    \vspace{1cm}
+    % Department and University
+    {\Large\bfseries Department of Computer Science and Engineering\par}
+
+    {\Large\bfseries Silicon University  - 751024\par}
+
+\end{titlepage}
+
+% Preliminaries
+
+% Abstract
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+\begin{spacing}{1.2}
+Predicting short-term stock market movements is a challenging task due to the complex,
+volatile, and highly dynamic nature of financial markets. Traditional prediction approaches often
+rely primarily on historical market data and technical indicators, while ignoring the influence of
+financial news and investor sentiment. On the other hand, sentiment-based approaches may
+overlook important numerical patterns present in market data. This project proposes a
+multimodal machine learning framework that combines these two sources of information to
+predict the next-day direction of the S\&P 500 Index.
+\newline
+The proposed system uses historical S\&P 500 market data obtained through financial data
+sources and extracts numerical features such as returns, Relative Strength Index (RSI), Moving
+Average Convergence Divergence (MACD), and trading volume. In parallel, financial news
+headlines are processed using FinBERT, a transformer-based language model specialized for
+financial text, to obtain positive, negative, and neutral sentiment scores. The two modalities are
+then aligned chronologically and combined into a unified feature set while maintaining a strict
+time-based data split to reduce the risk of data leakage and look-ahead bias.
+\newline
+The fused dataset is used to train and compare multiple supervised machine learning
+models, including Logistic Regression, XGBoost, and Random Forest, for binary classification
+of the next trading day's market direction as Up or Down. Model performance is evaluated
+using accuracy, precision, recall, F1-score, ROC-AUC, and confusion matrices. The study
+also compares numerical-only, sentiment-only, and multimodal approaches to examine whether
+combining financial news sentiment with technical market information provides additional
+predictive value.
+\newline
+On a held-out test period of 297 trading days, test accuracy of the nine model and feature-set
+combinations ranged from 47.8\% to 52.2\% against a majority-class baseline of 50.2\%, and
+ROC-AUC from 0.481 to 0.539. The multimodal model improved the best numerical-only ROC-AUC
+by only 0.019, which is within sampling error, so no model showed predictive skill beyond
+chance. Most models predicted the Up class on the great majority of days, and their balanced
+accuracy was about 0.50. The result is consistent with the efficient market hypothesis. A demonstration
+forecast for the next trading day, made with technical indicators only because no live news feed is
+available, is included to show how the pipeline is applied to current data.
+\newline
+The project aims to demonstrate a practical application of Natural Language Processing
+and machine learning in financial forecasting while providing an interpretable and reproducible
+framework suitable for academic experimentation.
+\end{spacing}
+\clearpage
+
+% Candidate's Declaration
+\chapter*{Candidate's Declaration}
+\addcontentsline{toc}{chapter}{Candidate's Declaration}
+\begin{spacing}{1.2}
+I hereby certify that the work, which is being presented in the project report, entitled \textbf{Stock Trend Prediction using Machine Learning}, in partial fulfillment of the requirement for the award of the B.Tech in Computer Science and Engineering  and submitted to the institution is an authentic record of my own work carried out during the period \textbf{start  to end} under the supervision of \textbf{Dr. Pradipta Kumar Pattanayak}.
+
+I also cited the reference about the text(s)/figure(s)/table(s)/equation(s) from where they have been taken.
+\newline
+
+The matter presented in this report has not been submitted elsewhere for the award of any other degree or diploma from any institutions.
+\newline
+\newline
+\newline
+
+\textbf{Date:} \rule{3cm}{.15mm} \hspace{5cm} \textbf{Signature of the Candidate }
+\newline
+\rule{0cm}{0mm} \hspace{9cm} \textbf{1.}
+\newline
+\newline
+\rule{0cm}{0mm} \hspace{9cm} \textbf{2.}
+\newline
+\newline
+\rule{0cm}{0mm} \hspace{9cm} \textbf{3.}
+\newline
+\newline
+\rule{0cm}{0mm} \hspace{9cm} \textbf{4.}
+\newline
+\newline
+\rule{0cm}{0mm} \hspace{9cm} \textbf{5.}
+
+
+\vspace{1cm}
+
+This is to certify that the above statement made by the candidate is correct to the best of my knowledge.
+
+\vspace{3cm}
+
+\begin{minipage}[t]{0.3\textwidth}
+\begin{center}
+
+    \textbf{Signature of \\ Supervisor(s)} \\
+
+    \end{center}
+\end{minipage}%
+\hfill
+\begin{minipage}[t]{0.4\textwidth}
+\begin{center}
+
+
+
+    \end{center}
+\end{minipage}
+\end{spacing}
+\clearpage
+
+% Acknowledgements
+\chapter*{Acknowledgements}
+\addcontentsline{toc}{chapter}{Acknowledgements}
+
+We would like to express our sincere gratitude to our project guide, Dr.\ Pradipta Kumar Pattanayak, for his invaluable guidance, constructive feedback, and continuous encouragement throughout the course of this project. His insights into machine learning methodology and time-series evaluation practices were instrumental in shaping the direction and rigor of this work.
+
+We are also thankful to the faculty of the Department of Computer Science and Engineering for providing the academic environment and resources necessary to carry out this work, and to our peers for the many helpful discussions that clarified our understanding of the underlying concepts.
+
+Finally, we would like to thank our families and friends for their unwavering support and patience during the course of this project.
+
+\clearpage
+
+% Table of Contents, List of Figures and List of Tables
+\tableofcontents
+\clearpage
+\listoffigures
+\clearpage
+\listoftables
+\clearpage
+
+% Main content
+\input{chapters/ch1_introduction}
+\input{chapters/ch2_literature}
+\input{chapters/ch3_background}
+\input{chapters/ch4_approach}
+\input{chapters/ch5_implementation}
+\input{chapters/ch6_results}
+\input{chapters/ch7_conclusion}
+
+% References
+\renewcommand{\bibname}{References}
+\addcontentsline{toc}{chapter}{\bibname}
+\bibliographystyle{plain}
+\bibliography{references}
+
+% Appendices
+\appendix
+\input{chapters/appendix}
+
+\end{document}

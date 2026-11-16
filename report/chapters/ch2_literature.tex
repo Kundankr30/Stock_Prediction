@@ -1,0 +1,57 @@
+\chapter{Literature Review}
+
+\section{Overview}
+Research on predicting markets from text has grown steadily since the early 2000s. This chapter first summarises the foundational ideas, then reviews three recent studies that are closest to the present project in data and method, and finally identifies the gaps that motivate the proposed approach. The three recent studies were read in full for this review; where a statement concerns a limitation, it refers to what the respective paper itself reports or omits.
+
+\section{Foundations: Markets, News and Sentiment}
+The efficient market hypothesis states that security prices fully reflect available information~\cite{fama1970efficient}. In its weak form this makes past prices useless for forecasting, and in its semi-strong form it extends the claim to all public information, including news. A large empirical literature nevertheless reports small, short-lived departures from this ideal. Tetlock~\cite{tetlock2007giving} showed that the pessimism expressed in a widely read Wall Street Journal column predicted downward pressure on prices followed by a reversion, which gave content to the notion of ``investor sentiment''. Bollen, Mao and Zeng~\cite{bollen2011twitter} analysed the mood of large-scale Twitter feeds and reported that certain mood dimensions had predictive value for the Dow Jones Industrial Average. These studies motivate the use of text-derived sentiment as an input, while the efficient market hypothesis reminds us that any effect is likely to be small.
+
+On the technical side, indicators such as RSI~\cite{wilder1978new} and MACD summarise momentum and trend and remain standard features in applied work. They contain no information beyond the price and volume history, but they present that history in a form that classifiers can exploit more easily than raw prices.
+
+\section{Language Models for Financial Text}
+Dictionary-based sentiment scoring was the first approach, but general-purpose word lists perform poorly on financial language, where a word such as ``liability'' or ``tax'' is not negative in the usual sense. Pre-trained transformer models changed this. BERT~\cite{devlin2019bert} introduced deep bidirectional pre-training that can be fine-tuned for downstream tasks. FinBERT~\cite{araci2019finbert} further pre-trains BERT on a financial corpus and fine-tunes it for financial sentiment classification, outputting the probabilities of positive, negative and neutral for a sentence. Because it is publicly available and operates on a single headline in a fraction of a second, it is a practical choice for projects of this size, and it is the model used here.
+
+\section{Existing Projects on News-Based Index Prediction}
+
+\subsection{Headline-based index trend prediction}
+A study posted as arXiv:1806.09533~\cite{nlpheadlines2018} predicts the trend of the Dow Jones Industrial Average from the top 25 Reddit \texttt{r/worldnews} headlines of each day for 2008 to 2015, using ten classifiers. The best reported accuracy is 0.57, and accuracy is the only metric reported. This is a useful reference point, because it demonstrates that headline text alone yields results only slightly above chance, and because the same headline dataset is publicly available on Kaggle. Its limitations are that it predicts the movement associated with the same day's headlines rather than the next day's direction, and that the lack of precision, recall or ROC-AUC makes it hard to judge whether the classifiers are better than a majority-class guess.
+
+\subsection{Hybrid sentiment-technical framework with FinBERT and XGBoost}
+A preprint on engrXiv (number 5277)~\cite{hybridfinbert} combines FinBERT sentiment from Yahoo Finance and MarketWatch headlines with technical features (exponential moving averages, RSI, average true range and lagged volume) and uses XGBoost to predict the Dow Jones movement on 1,970 days. The reported metrics are 100\%, which the author himself suspects to be the result of leakage. The paper describes a static train--test split without temporal separation, and it does not define baselines. The study is closest to ours in spirit, since it also fuses FinBERT sentiment and technical indicators, and it illustrates precisely the evaluation hazard this project is designed to avoid: with a random split of a time series, neighbouring days (which share rolling-window statistics) land in both train and test sets, and a flexible model can memorise them.
+
+\subsection{Keyword groups and technical indicators with a GRU}
+The study at arXiv:2510.23112~\cite{groupshap2025} forecasts the S\&P 500 \emph{price} (a regression task) with a Gated Recurrent Unit network, using about 2,500 Google News articles from 2015 to 2024. It combines technical indicators, macroeconomic variables and FinBERT-based keyword groups, and interprets the contribution of the groups with a Shapley-value method. Only a technical-indicator GRU is used as a baseline, and the results are reported as MAE, RMSE and $R^2$. The training set covers three years and the evaluation one year, and no separate validation set is described. This is a strong example of a multimodal design, but because it predicts price levels and not direction, its numbers cannot be compared directly with those of a classifier, and because price levels are strongly autocorrelated, $R^2$ values for price regression are easy to inflate.
+
+\section{Comparison and Identified Gaps}
+Table~\ref{tab:gaps} summarises the three studies against the criteria that matter most for a trustworthy evaluation.
+
+\begin{table}[!htbp]
+\centering
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{@{}p{2.7cm}XXX@{}}
+\toprule
+ & Headline trend study~\cite{nlpheadlines2018} & FinBERT + XGBoost~\cite{hybridfinbert} & Keyword GRU~\cite{groupshap2025} \\
+\midrule
+Target & DJIA trend (same-day headlines) & DJIA movement & S\&P 500 price (regression) \\
+Text input & Top-25 Reddit headlines & Yahoo/MarketWatch headlines & Google News articles \\
+Numerical input & None & EMA, RSI, ATR, lagged volume & Technical + macro variables \\
+Evaluation & Accuracy only & 100\% on all metrics, leakage suspected & MAE, RMSE, $R^2$ \\
+Baseline & Not reported & Undefined & Technical-only GRU \\
+Temporal split & Not the focus & Static split without temporal separation & 3 years train, 1 year test; no validation set \\
+\bottomrule
+\end{tabularx}
+\caption{Summary of the reviewed studies (from the respective papers).}
+\label{tab:gaps}
+\end{table}
+
+From this comparison, four gaps emerge:
+\begin{enumerate}
+  \item \textbf{Single-modality designs.} The headline study uses text alone, and neither text nor numerical features are ablated individually in the others, so the marginal value of each modality remains unclear.
+  \item \textbf{Weak or missing baselines.} Without a majority-class baseline, an accuracy of 0.55 cannot be interpreted.
+  \item \textbf{Leakage-prone splits.} A static split without temporal separation inflates scores, as the 100\% result illustrates.
+  \item \textbf{Narrow metrics.} Accuracy alone hides class imbalance; precision, recall, F1, ROC-AUC and confusion matrices are needed to see how a model behaves on each class.
+\end{enumerate}
+
+\section{Positioning of the Present Work}
+The present project addresses these gaps within the limits of an academic lab project. It uses both modalities and also evaluates each alone (numerical-only, sentiment-only and multimodal). It reports a majority-class baseline and a margin of error. It uses a strictly chronological split, a one-day lag on the sentiment features, scaling fitted on training data only and walk-forward cross-validation for tuning. It evaluates with six measures and confusion matrices. The aim is not to claim a profitable trading signal, but to build a transparent and reproducible comparison whose conclusion, whether positive or negative, can be trusted.

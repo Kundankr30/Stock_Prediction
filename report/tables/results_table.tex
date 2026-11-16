@@ -1,0 +1,19 @@
+\begin{tabular}{@{}llccccc@{}}
+\toprule
+Feature set & Model & Accuracy & Precision & Recall & F1 & ROC-AUC \\
+\midrule
+Numerical-only & Logistic Regression & 0.498 & 0.500 & 0.993 & 0.665 & 0.520 \\
+ & Random Forest & 0.512 & 0.507 & 0.913 & 0.652 & 0.487 \\
+ & XGBoost & 0.498 & 0.500 & 0.926 & 0.649 & 0.482 \\
+\midrule
+Sentiment-only & Logistic Regression & 0.505 & 0.503 & 0.973 & 0.664 & 0.524 \\
+ & Random Forest & 0.502 & 0.502 & 0.779 & 0.611 & 0.520 \\
+ & XGBoost & 0.478 & 0.482 & 0.550 & 0.514 & 0.500 \\
+\midrule
+Multimodal & Logistic Regression & 0.498 & 0.500 & 0.933 & 0.651 & \textbf{0.539} \\
+ & Random Forest & 0.512 & 0.507 & 0.966 & 0.665 & 0.483 \\
+ & XGBoost & 0.522 & 0.515 & 0.826 & 0.634 & 0.481 \\
+\midrule
+\multicolumn{2}{l}{Majority-class baseline} & 0.502 & -- & -- & -- & 0.500 \\
+\bottomrule
+\end{tabular}

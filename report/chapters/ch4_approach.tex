@@ -1,0 +1,125 @@
+\chapter{Proposed Approach}
+
+\section{Overview of the Framework}
+The proposed system is a two-branch pipeline whose branches are merged by early fusion. One branch turns market data into technical features. The other turns news headlines into sentiment features using FinBERT. The two feature tables are aligned on the calendar date, combined, split chronologically, and used to train three classifiers whose predictions are evaluated on a held-out future period. Figure~\ref{fig:architecture} shows the architecture.
+
+\begin{figure}[!htbp]
+\centering
+\begin{tikzpicture}
+  \node[tbox] (mkt) at (-3.6,0) {\textbf{Market data}\\ S\&P 500 daily OHLCV (yfinance)};
+  \node[tbox] (tech) at (-3.6,-1.7) {\textbf{Technical features}\\ ret\_1d, ret\_5d, rsi\_14,\\ macd (3 series), vol\_chg};
+  \node[pbox] (news) at (3.6,0) {\textbf{News data}\\ Top-25 daily headlines (Kaggle)};
+  \node[pbox] (fin) at (3.6,-1.7) {\textbf{FinBERT}\\ per-headline positive,\\ negative, neutral probabilities};
+  \node[pbox] (agg) at (3.6,-3.4) {\textbf{Daily sentiment}\\ sent\_pos, sent\_neg, sent\_neu};
+  \node[cbox, text width=11cm] (fuse) at (0,-5.5) {\textbf{Join on date, then lag sentiment by 1 day}\\ numerical (7) + sentiment (3) = multimodal (10)};
+  \node[gbox, text width=11cm] (split) at (0,-7.0) {\textbf{Chronological split 70 / 15 / 15}\\ scaler fitted on train only};
+  \node[gbox, text width=11cm] (models) at (0,-8.5) {\textbf{Logistic Regression \quad Random Forest \quad XGBoost}\\ walk-forward tuning, ROC-AUC};
+  \node[cbox, text width=11cm] (eval) at (0,-10.0) {\textbf{Evaluation on test period}\\ accuracy, precision, recall, F1, ROC-AUC, confusion matrix};
+  \draw[flow] (mkt) -- (tech);
+  \draw[flow] (news) -- (fin);
+  \draw[flow] (fin) -- (agg);
+  \draw[flow] (tech.south) -- (tech.south |- fuse.north);
+  \draw[flow] (agg.south) -- (agg.south |- fuse.north);
+  \draw[flow] (fuse) -- (split);
+  \draw[flow] (split) -- (models);
+  \draw[flow] (models) -- (eval);
+\end{tikzpicture}
+\caption{Architecture of the proposed multimodal stock-direction prediction system.}
+\label{fig:architecture}
+\end{figure}
+
+\section{Data Sources}
+
+\subsection{Market data}
+Daily S\&P 500 data (ticker \texttt{\textasciicircum GSPC}) are downloaded from Yahoo Finance~\cite{yahoofinance} with the \texttt{yfinance} library (unadjusted prices, \texttt{auto\_adjust=False}) for the period 1 August 2008 to 1 July 2016. The download contains the fields Open, High, Low, Close, Adj Close and Volume and is saved as \texttt{sp500\_raw.csv}; the closing value and the traded volume are used. Figure~\ref{fig:sp500} shows the closing value of the index over this period which the models divide chronologically into training, validation and test periods. The period includes the final phase of the financial crisis, the low point in March 2009, and the long recovery that followed.
+
+\begin{figure}[!htbp]
+\centering
+\maybefigure{fig_sp500_split.png}{0.95\textwidth}{6cm}{Daily S\&P 500 closing value, August 2008 to July 2016, with the training, validation and test regions}
+\caption{Daily S\&P 500 closing value from Yahoo Finance, August 2008 to July 2016. The first 70\% of trading days form the training set, the next 15\% the validation set and the final 15\% the test set.}
+\label{fig:sp500}
+\end{figure}
+
+\subsection{News data}
+The news modality comes from the Kaggle dataset ``Daily News for Stock Market Prediction''~\cite{kaggledaily}, file \texttt{Combined\_News\_DJIA.csv}. Each row corresponds to one date and contains the 25 most up-voted headlines (\texttt{Top1} to \texttt{Top25}) of the Reddit \texttt{r/worldnews} forum for that day. The file also contains a \texttt{Label} column describing the movement of the Dow Jones index; since our target is the S\&P 500 and the label is defined differently, this column is ignored.
+
+\section{Numerical Branch}
+For each trading day the branch computes the seven features of Chapter~3: \texttt{ret\_1d}, \texttt{ret\_5d}, \texttt{rsi\_14}, \texttt{macd}, \texttt{macd\_signal}, \texttt{macd\_hist} and \texttt{vol\_chg}. The target is created with Equation~\ref{eq:target}, by comparing the next day's close to the current close. The first rows, where rolling windows are incomplete (the RSI needs 14 days), and the last row, for which no next-day close exists, are removed; infinite volume changes are treated as missing. The result is saved as \texttt{features.csv}.
+
+\section{Sentiment Branch}
+The Kaggle file is restricted to the dates of the price data and converted from one column per headline (\texttt{Top1} to \texttt{Top25}) into one row per headline. Many headlines are stored as printed Python byte strings (\texttt{b'...'}); this wrapper, surrounding quotes and repeated white space are removed, headlines of five characters or fewer are dropped, and duplicate headlines within a day are removed. Every remaining headline (at most 25 per day, so close to 50,000 in total) is passed through the \texttt{ProsusAI/finbert} model, truncated to 64 tokens, in batches of 64. The model returns the three class probabilities for each headline. Scoring is the most expensive step of the project, so the headline-level scores are written to disk in chunks of 1,000 (\texttt{headline\_scores.csv}) and a rerun continues where it stopped. The scores are then averaged by date into three daily features, \texttt{sent\_pos}, \texttt{sent\_neg} and \texttt{sent\_neu}, together with the number of headlines of the day, and saved as \texttt{sentiment\_daily.csv}. A check confirms that the three probabilities of every headline sum to one.
+
+\section{Fusion and Alignment}
+The two tables (\texttt{features.csv} and \texttt{sentiment\_daily.csv}) are joined by an inner join on the calendar date, so that only days present in both are kept. This also removes weekends and holidays on which news exists but the market is closed.
+
+The timing of information deserves care. The headlines dated $t$ describe events that occurred during day $t$. Whether a trader could have used them depends on when they appeared relative to the close, which the dataset does not record. To make sure that no sentiment that may have been published after the close is used, and to keep the design conservative, the project uses a lag of one trading day: the sentiment features aligned with day $t$ are those computed from the headlines of day $t-1$, and the model predicts the direction for day $t+1$ from technical features of day $t$ and sentiment of $t-1$. In the implementation, the \texttt{shift(1)} operation is applied \emph{after} the join, so that the shift moves along the sequence of trading days, not calendar days (a shift before the join would mis-align Mondays). The notebook verifies the lag with an assertion that each row holds the values its predecessor held before the shift, and the first row, which has no previous day, is dropped. Figure~\ref{fig:timeline} illustrates the alignment.
+
+\begin{figure}[!htbp]
+\centering
+\begin{tikzpicture}[x=2.6cm, y=1cm]
+  \foreach \i/\lab in {0/{$t-1$},1/{$t$},2/{$t+1$}} {
+    \node[draw=grayline, fill=grayfill, minimum width=2.2cm, minimum height=0.8cm] (d\i) at (\i,0) {\lab};
+  }
+  \node[tbox, text width=2.1cm] (nh) at (0,1.6) {headlines of $t-1$};
+  \node[tbox, text width=2.1cm] (ft) at (1,1.6) {indicators at close of $t$};
+  \node[cbox, text width=2.1cm] (y) at (2,1.6) {target: $P_{t+1}>P_t$?};
+  \draw[flow] (nh) -- (d0);
+  \draw[flow] (ft) -- (d1);
+  \draw[flow] (y) -- (d2);
+  \draw[flow, dashed] (d0.south) -- ++(0,-0.6) -| node[pos=0.25, below, font=\footnotesize] {sentiment features used for day $t$} (d1.south);
+\end{tikzpicture}
+\caption{Temporal alignment. Features for day $t$ use technical indicators up to the close of $t$ and sentiment from headlines of $t-1$; the label is the direction of $P_{t+1}$ relative to $P_t$.}
+\label{fig:timeline}
+\end{figure}
+
+\section{Feature Sets for the Ablation}
+Three feature sets are defined, as in Table~\ref{tab:featuresets}. Every model is trained on every feature set, giving nine experiments. Comparing multimodal to numerical-only isolates the contribution of sentiment, and comparing multimodal to sentiment-only isolates the contribution of the technical indicators.
+
+\begin{table}[!htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l c X@{}}
+\toprule
+Feature set & Size & Columns \\
+\midrule
+Numerical-only & 7 & ret\_1d, ret\_5d, rsi\_14, macd, macd\_signal, macd\_hist, vol\_chg \\
+Sentiment-only & 3 & sent\_pos, sent\_neg, sent\_neu (lagged one day) \\
+Multimodal & 10 & all of the above \\
+\bottomrule
+\end{tabularx}
+\caption{Feature sets used in the ablation study.}
+\label{tab:featuresets}
+\end{table}
+
+\section{Leakage-Control Design}
+The following measures protect the evaluation from look-ahead bias.
+\begin{enumerate}
+  \item \textbf{Chronological split.} The first 70\% of days form the training set, the next 15\% the validation set, and the final 15\% the test set. No shuffling is performed.
+  \item \textbf{Scaling.} A \texttt{StandardScaler} is fitted on the training set only, and applied unchanged to validation and test.
+  \item \textbf{Sentiment lag.} Sentiment is shifted by one trading day after the join.
+  \item \textbf{Walk-forward tuning.} Hyper-parameters are tuned with \texttt{TimeSeriesSplit} (three splits) on the training set, scored with ROC-AUC. The validation set is not used for selection; it only provides an additional ROC-AUC (\texttt{val\_auc}) for diagnosis, and the test set is not consulted during tuning.
+  \item \textbf{Sanity checks.} In Step 2 an assertion confirms that no technical feature has an absolute correlation of 0.2 or more with the target (a value close to 1 would indicate a feature that contains the answer); in Step 4 assertions confirm the lag and that the training, validation and test periods follow one another in time without overlap.
+  \item \textbf{Baseline.} The majority-class baseline is the accuracy obtained on the test set by always predicting the class that is more frequent in the training set; it is reported next to all models.
+\end{enumerate}
+
+\section{Models and Hyper-parameter Search}
+Table~\ref{tab:grids} lists the search grids. They are intentionally small and conservative, because the number of training days (about 1,400) is small relative to the noise in the problem, and large grids would mostly increase the risk of overfitting the cross-validation folds. All stochastic components use the seed 42.
+
+\begin{table}[!htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+Model & Grid \\
+\midrule
+Logistic Regression & $C \in \{0.01, 0.1, 1, 10\}$ \\
+Random Forest & 200 trees; max\_depth $\in \{3, 5, 8\}$; min\_samples\_leaf $\in \{5, 20\}$ \\
+XGBoost & n\_estimators $\in \{100, 300\}$; max\_depth $\in \{2, 3, 4\}$; learning\_rate $\in \{0.03, 0.1\}$ \\
+\bottomrule
+\end{tabularx}
+\caption{Hyper-parameter grids searched with walk-forward cross-validation.}
+\label{tab:grids}
+\end{table}
+
+\section{Evaluation Protocol}
+After tuning, each model is refitted on the whole training set with its best parameters (the default behaviour of \texttt{GridSearchCV}) and evaluated once on the test set. Class predictions use a probability threshold of 0.5, and the ROC curves and ROC-AUC use the predicted probabilities. The reported measures are accuracy, precision, recall, F1-score and ROC-AUC, together with confusion matrices. The ROC-AUC of the three feature sets is the main basis for the conclusion; accuracy is interpreted relative to the majority-class baseline and its margin of error.

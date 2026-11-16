@@ -1,0 +1,54 @@
+\chapter{Introduction}
+
+\section{Background and Motivation}
+Financial markets aggregate the beliefs, expectations and decisions of millions of participants, and the prices they produce change every second. For individual investors, institutions and researchers alike, the ability to anticipate even the direction of the next day's move in a broad index would be valuable. The S\&P 500 index, which tracks the share prices of 500 large companies listed on United States exchanges, is the most widely followed benchmark of the American equity market and is therefore a natural target for such an effort.
+
+Two families of information are traditionally used to reason about short-term price movements. The first is \emph{numerical market data}: the history of prices and traded volume, and the technical indicators derived from them, such as returns, the Relative Strength Index (RSI) and the Moving Average Convergence Divergence (MACD). The second is \emph{textual information}: news headlines, reports and social media posts through which new information reaches investors and shapes their mood. Most published machine learning studies use only one of the two. Price-based models ignore the context in which the prices were formed, and text-based models ignore the numerical regime (trending, oversold, high-volume) that determines how the market reacts to a given piece of news.
+
+Recent advances in Natural Language Processing (NLP) make it practical to combine both. Transformer language models such as BERT~\cite{devlin2019bert} can be fine-tuned for specialised domains, and FinBERT~\cite{araci2019finbert} is one such model trained on financial text. It converts a headline into probabilities of positive, negative and neutral sentiment, which are numbers that a conventional classifier can consume alongside technical indicators. This opens the door to a \emph{multimodal} approach, in which two different modalities (numbers and text) are fused into a single model.
+
+\section{Problem Statement}
+The problem addressed in this project is stated as follows.
+
+\begin{quote}
+\emph{Given the market data and the news headlines available up to the close of trading day $t$, predict whether the closing value of the S\&P 500 index on day $t+1$ will be higher (Up) or lower or equal (Down) than its closing value on day $t$.}
+\end{quote}
+
+This is a supervised binary classification problem. Let $x_t$ denote the feature vector assembled from information available at the end of day $t$, and let
+\begin{equation}
+y_t =
+\begin{cases}
+1 & \text{if } P_{t+1} > P_t,\\
+0 & \text{otherwise,}
+\end{cases}
+\label{eq:target}
+\end{equation}
+where $P_t$ is the closing value of the index on day $t$. The learning task is to estimate a function $f$ such that $f(x_t) \approx y_t$, with $f$ trained only on days earlier than those on which it is evaluated.
+
+The problem is deliberately difficult. According to the efficient market hypothesis~\cite{fama1970efficient}, prices already reflect all available information, which implies that little or nothing can be gained by modelling past prices and public news. Empirically, next-day direction behaves close to a fair coin: the share of Up days in a bull market is typically only a few percentage points above one half. A credible study of this problem must therefore state its baselines honestly, report uncertainty, and guard against the evaluation mistakes (especially look-ahead bias) that produce spuriously impressive accuracy figures.
+
+\section{Objectives}
+The objectives of the project are the following.
+\begin{enumerate}
+  \item To collect and clean daily S\&P 500 market data and derive numerical features: one-day and five-day returns, RSI, MACD (line, signal and histogram) and the relative change in trading volume.
+  \item To score daily financial news headlines with FinBERT and aggregate the scores into daily positive, negative and neutral sentiment features.
+  \item To align the two modalities chronologically and fuse them into one feature set without leaking future information into the past.
+  \item To train and tune three supervised classifiers, namely Logistic Regression, Random Forest and XGBoost, on the fused features.
+  \item To evaluate all models on a strictly later, untouched test period using accuracy, precision, recall, F1-score, ROC-AUC and confusion matrices, and to compare them with a majority-class baseline.
+  \item To run an ablation comparing three feature sets (numerical-only, sentiment-only and multimodal) in order to determine whether sentiment adds predictive value beyond technical indicators.
+\end{enumerate}
+
+\section{Scope and Assumptions}
+The study is limited to the daily frequency and to a single index. The text modality is represented by headlines only, not full articles. The target is the direction of the next close, and no trading strategy, transaction costs or position sizing are modelled; the project therefore makes no claim about profitability. The experiments use a historical window for which a labelled headline corpus is openly available (August 2008 to July 2016), and a live-news extension is described as future work. The work is an academic exercise in applying machine learning and NLP to financial data, and nothing in this report should be construed as investment advice.
+
+\section{Contributions}
+The principal contributions of this project are:
+\begin{itemize}
+  \item a reproducible, notebook-based pipeline that takes the project from raw data download to a final comparison of models;
+  \item a leakage-aware design: the sentiment features are shifted by one trading day after the join, the split is chronological, the scaler is fitted on the training data only, and hyper-parameters are tuned with walk-forward cross-validation;
+  \item a three-way ablation (numerical, sentiment, multimodal) evaluated with several metrics rather than accuracy alone, together with a majority-class baseline and an estimate of the sampling error of the test accuracy;
+  \item a critical review of existing work in this area, identifying the evaluation weaknesses that the present design is intended to avoid.
+\end{itemize}
+
+\section{Organisation of the Report}
+The remainder of this report is organised as follows. Chapter~2 reviews existing work on news-based and hybrid stock prediction and identifies gaps. Chapter~3 gives the theoretical background on technical indicators, FinBERT, the classifiers and the evaluation metrics. Chapter~4 presents the proposed multimodal approach and its leakage-control design. Chapter~5 describes the implementation, including the data sources, the feature engineering code and the model training procedure. Chapter~6 reports the experimental protocol, results and discussion. Chapter~7 concludes and outlines future work. The Appendix lists the environment, the file layout and supplementary code.

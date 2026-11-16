@@ -1,0 +1,24 @@
+\chapter{Conclusion and Future Work}
+
+\section{Conclusion}
+This project designed and implemented a multimodal machine learning framework for predicting the next-day direction of the S\&P 500 index. Technical features derived from market data (returns, RSI, MACD and volume change) were combined by early fusion with daily sentiment scores obtained by applying FinBERT to news headlines. Logistic Regression, Random Forest and XGBoost were trained on three feature sets, namely numerical-only, sentiment-only and multimodal, and evaluated with accuracy, precision, recall, F1-score, ROC-AUC and confusion matrices.
+
+The main contribution is the evaluation design. The review of recent work in Chapter~2 showed that results in this area are often reported with accuracy only, without baselines, or with splits that allow look-ahead leakage. In response, the framework uses a strictly chronological 70/15/15 split, a one-day lag of the sentiment features applied after the join, scaling fitted on training data only, walk-forward hyper-parameter tuning and a majority-class baseline with a stated margin of error. The ablation across feature sets isolates the effect of each modality, so the conclusion on whether sentiment adds value does not rest on a single number.
+
+The test-set results (Chapter~6) show that none of the nine model and feature-set combinations demonstrated predictive skill. Accuracies lie between 47.8\% and 52.2\% against a majority-class baseline of \BaselineAcc{}, and ROC-AUC lies between 0.481 and \BestAUC{}, the latter reached by \BestModel{} on the \BestFeatureSet{} features. The multimodal model improved on the best numerical-only ROC-AUC by only \AUCDelta{}, which is within sampling error for \TestDays{} test days. Most models also fell back to predicting the Up class for the great majority of days: eight of the nine predicted Up on more than three quarters of the test days, and their balanced accuracy was between 0.478 and 0.521, that is, at the no-skill value of 0.5.
+
+We therefore conclude that, in this experiment, combining FinBERT sentiment of Reddit world-news headlines with technical indicators did not produce a measurable improvement in next-day direction prediction of the S\&P 500. This is a legitimate finding: it is consistent with the efficient market hypothesis and with the modest accuracies (about 57\% at best) reported by comparable headline-based studies, and it contrasts with the near-perfect scores of leakage-prone designs. The value of the project lies in the evaluation design, which makes this negative result trustworthy rather than in a claim of predictive power.
+
+The pipeline was also applied to current data in a demonstration (Section~\ref{sec:forecast}). Using only technical indicators, because no live headline source was available, the numerical-only Logistic Regression gave a probability of 0.561 that the next trading day after 13 November 2026 closes higher. This shows that the framework can produce a forecast for the coming day, but given the test results it should be read as a demonstration of the procedure, not as a signal.
+
+\section{Future Work}
+Several extensions are natural.
+\begin{enumerate}
+  \item \textbf{Live news.} Replace the historical corpus with a live headline feed, so that the multimodal model, and not only the numerical-only model of the demonstration, can produce a prediction for the coming trading day. This requires a news source with a known publication time, daily FinBERT scoring, and a decision on the cut-off time relative to the market close.
+  \item \textbf{Richer text.} Use finance-specific sources (newswires, earnings calls, filings) and full articles rather than headlines, and weight headlines by relevance or source reliability.
+  \item \textbf{Fine-tuning.} Fine-tune the language model on the prediction target, or use embeddings from the model rather than three probabilities, at the cost of a larger and riskier model.
+  \item \textbf{Sequence models.} Use LSTM or GRU networks that consume a window of past days, and late or intermediate fusion architectures.
+  \item \textbf{More robust evaluation.} Use rolling-origin evaluation over several test windows and several market regimes, add statistical tests for the difference between models, and extend the study to other indices and to longer horizons.
+  \item \textbf{Economic evaluation.} Translate predictions into a simple trading rule and report returns after transaction costs and risk-adjusted measures, to move from classification quality to practical value.
+  \item \textbf{Explainability.} Apply Shapley-value analysis to quantify the contribution of each modality to individual predictions.
+\end{enumerate}

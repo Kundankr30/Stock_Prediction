@@ -1,0 +1,188 @@
+\chapter{Implementation}
+
+\section{Development Environment}
+The project is implemented in Python as a sequence of Jupyter notebooks, one for each stage, so that every intermediate result can be inspected and saved to disk. The main libraries are \texttt{pandas} and \texttt{numpy} for data handling, \texttt{yfinance} for market data, \texttt{transformers} and \texttt{torch} for FinBERT, \texttt{tqdm} for progress bars, \texttt{scikit-learn}~\cite{pedregosa2011scikit} for preprocessing, Logistic Regression, Random Forest and evaluation, \texttt{xgboost}~\cite{chen2016xgboost} for gradient boosting, and \texttt{matplotlib} for figures. The work was carried out on a Windows machine using the Windows Subsystem for Linux and Visual Studio Code with the Jupyter extension. FinBERT runs on a GPU when one is available and on the CPU otherwise; the notebooks suggest running the scoring step on Google Colab with a GPU and copying the result back.
+
+\section{Notebook Pipeline}
+The pipeline consists of five notebooks, each reading the files written by the previous ones, followed by a sixth notebook that produces a demonstration forecast for the next trading day (Table~\ref{tab:notebooks}). The main settings are defined at the top of the relevant notebook: \texttt{LAG\_DAYS} and \texttt{TRAIN\_FRAC}/\texttt{VAL\_FRAC} in the fusion notebook, \texttt{RANDOM\_STATE} in the model notebook, and \texttt{SAMPLE} in the sentiment notebook (a switch for testing the scoring step on a few hundred headlines; it is \texttt{None} for the full run).
+
+\begin{table}[!htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}c p{3.4cm} X p{4.3cm}@{}}
+\toprule
+Step & Notebook & Purpose & Output \\
+\midrule
+1 & \texttt{yfinance} & Download S\&P 500 prices with yfinance, check missing values and duplicates & \texttt{sp500\_raw.csv} \\
+2 & \texttt{features} & Technical features, target, leakage check & \texttt{features.csv} \\
+3 & \texttt{sentiment} & Clean headlines, score with FinBERT, aggregate by day & \texttt{headline\_scores.csv}, \texttt{sentiment\_daily.csv} \\
+4 & \texttt{fusion\_split} & Join, lag, chronological split & \texttt{fused.csv}, \texttt{train.csv}, \texttt{val.csv}, \texttt{test.csv} \\
+5 & \texttt{models} & Tune, train, evaluate, ablate, demonstration forecast & \texttt{results.csv} \\
+6 & \texttt{tomorrow} & Live next-day forecast from technical indicators only & printed forecast \\
+\bottomrule
+\end{tabularx}
+\caption{The six notebooks of the project.}
+\label{tab:notebooks}
+\end{table}
+
+\section{Step 1: Market Data}
+The notebook first tests the download on a short period, then downloads the daily data for \texttt{\textasciicircum GSPC} from 1 August 2008 to 2 July 2016 (the end date is exclusive), flattens the column index that recent versions of \texttt{yfinance} return, removes the time zone from the dates and keeps the columns Date, Open, High, Low, Close, Adj Close and Volume. It prints the number of rows, the date range, missing values and duplicate dates, plots the closing value (Figure~\ref{fig:sp500}) and saves \texttt{data/sp500\_raw.csv}. Later steps read this file, so the prices are the same in every run, even if Yahoo Finance revises its data later.
+
+\section{Step 2: Technical Features and Target}
+The features are computed with vectorised \texttt{pandas} operations (Listing~\ref{lst:features}). The step ends with a leakage check: the correlation of each feature with the target is printed and an assertion stops the notebook if any absolute correlation is 0.2 or more.
+
+\begin{lstlisting}[float=!htbp, caption={Technical features and target (Step 2).}, label={lst:features}]
+def rsi(close, window=14):
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / window, adjust=False, min_periods=window).mean()
+    avg_loss = loss.ewm(alpha=1 / window, adjust=False, min_periods=window).mean()
+    rs = avg_gain / avg_loss
+    return 100 - 100 / (1 + rs)
+
+df = prices[["Date", "Close", "Volume"]].copy()
+df["ret_1d"] = df["Close"].pct_change()
+df["ret_5d"] = df["Close"].pct_change(5)
+df["rsi_14"] = rsi(df["Close"])
+
+ema12 = df["Close"].ewm(span=12, adjust=False).mean()
+ema26 = df["Close"].ewm(span=26, adjust=False).mean()
+macd = ema12 - ema26
+macd_signal = macd.ewm(span=9, adjust=False).mean()
+df["macd"] = macd / df["Close"] * 100      # scaled by price
+df["macd_signal"] = macd_signal / df["Close"] * 100
+df["macd_hist"] = df["macd"] - df["macd_signal"]
+df["vol_chg"] = df["Volume"].pct_change().replace([np.inf, -np.inf], np.nan)
+
+df["target"] = (df["Close"].shift(-1) > df["Close"]).astype(float)
+df.loc[df.index[-1], "target"] = np.nan    # last day has no next-day close
+
+TECH_COLS = ["ret_1d", "ret_5d", "rsi_14", "macd", "macd_signal",
+             "macd_hist", "vol_chg"]
+features = df.dropna(subset=TECH_COLS + ["target"]).reset_index(drop=True)
+\end{lstlisting}
+
+The notebook also prints the number of Down and Up days and the share of Up days, shows summary statistics and histograms of the features, and saves \texttt{data/features.csv}.
+
+\section{Step 3: News Cleaning and Sentiment Scoring}
+The Kaggle file is read, sorted by date and restricted to the dates of the price data. The 25 headline columns are converted into one row per headline with \texttt{melt}. Each headline is cleaned (the \texttt{b'...'} wrapper, quotes and repeated white space are removed), headlines of five characters or fewer are dropped, and duplicates within a day are removed. The headlines are then scored with the Hugging Face \texttt{pipeline} interface, requesting all class probabilities (\texttt{top\_k=None}), in chunks of 1,000 headlines whose results are appended to \texttt{data/headline\_scores.csv}, so that an interrupted run can resume (Listing~\ref{lst:finbert}).
+
+\begin{lstlisting}[float=!htbp, caption={FinBERT scoring and daily aggregation (Step 3).}, label={lst:finbert}]
+finbert = pipeline("text-classification", model="ProsusAI/finbert",
+                   top_k=None, truncation=True, max_length=64,
+                   device=0 if torch.cuda.is_available() else -1)
+
+def score_headlines(texts, batch_size=64):
+    out = finbert(list(texts), batch_size=batch_size)
+    return pd.DataFrame([{d["label"].lower(): d["score"] for d in o}
+                         for o in out])[["positive", "negative", "neutral"]]
+
+CHUNK = 1000
+for i in tqdm(range(0, len(remaining), CHUNK)):
+    part = remaining.iloc[i:i + CHUNK].reset_index(drop=True)
+    scored = pd.concat([part, score_headlines(part["headline"])], axis=1)
+    done = pd.concat([done, scored], ignore_index=True)
+    done.to_csv(SCORES_CSV, index=False)        # resumable cache
+
+daily = (done.groupby("Date")
+             .agg(sent_pos=("positive", "mean"),
+                  sent_neg=("negative", "mean"),
+                  sent_neu=("neutral", "mean"),
+                  n_headlines=("positive", "size"))
+             .reset_index())
+daily.to_csv("data/sentiment_daily.csv", index=False)
+\end{lstlisting}
+
+The step also checks that the three scores of every headline sum to one, prints the share of headlines by their most probable label, lists the most positive and most negative headlines for a plausibility check, and plots a 30-day moving average of the daily sentiment.
+
+\section{Step 4: Fusion, Lag and Split}
+The fusion step performs the operations that most affect the validity of the study. Listing~\ref{lst:fusion} shows them in order. The notebook first reports how many trading days have no news and how many news days are not trading days (weekends and holidays, which the inner join drops).
+
+\begin{lstlisting}[float=!htbp, caption={Alignment, lag and chronological split (Step 4).}, label={lst:fusion}]
+TECH_COLS = ["ret_1d", "ret_5d", "rsi_14", "macd", "macd_signal",
+             "macd_hist", "vol_chg"]
+SENT_COLS = ["sent_pos", "sent_neg", "sent_neu"]
+
+data = (features.merge(sentiment[["Date"] + SENT_COLS],
+                       on="Date", how="inner")      # inner join on Date
+                .sort_values("Date").reset_index(drop=True))
+
+LAG_DAYS = 1
+before = data[SENT_COLS].copy()
+data[SENT_COLS] = data[SENT_COLS].shift(LAG_DAYS)   # lag AFTER the join
+assert (data[SENT_COLS].iloc[LAG_DAYS:].values ==
+        before.iloc[:-LAG_DAYS].values).all(), "Lag check failed"
+
+data = data.dropna(subset=TECH_COLS + SENT_COLS + ["target"])
+data = data.reset_index(drop=True)
+
+FEATURE_SETS = {"numerical-only": TECH_COLS,
+                "sentiment-only": SENT_COLS,
+                "multimodal": TECH_COLS + SENT_COLS}
+
+TRAIN_FRAC, VAL_FRAC = 0.70, 0.15
+n = len(data)
+i_train, i_val = int(n * TRAIN_FRAC), int(n * (TRAIN_FRAC + VAL_FRAC))
+train, val, test = (data.iloc[:i_train].copy(),
+                    data.iloc[i_train:i_val].copy(),
+                    data.iloc[i_val:].copy())
+assert train["Date"].max() < val["Date"].min() < val["Date"].max() < test["Date"].min()
+\end{lstlisting}
+
+The inner join keeps only days for which both modalities are present, the \texttt{shift} after the join implements the lag in trading days, and the assertion verifies it. The notebook then prints the size, date range and share of Up days of each part, computes the majority-class baseline from the training data, demonstrates that a \texttt{StandardScaler} fitted on the training rows gives approximately zero mean and unit variance on the training set but not exactly on the test set, plots the closing value coloured by split, and saves \texttt{fused.csv}, \texttt{train.csv}, \texttt{val.csv} and \texttt{test.csv}.
+
+\section{Step 5: Training, Tuning and Evaluation}
+Each of the three models is tuned for each of the three feature sets, using \texttt{GridSearchCV} with \texttt{TimeSeriesSplit(n\_splits=3)} and ROC-AUC as the scoring rule. A separate \texttt{StandardScaler} is fitted on the training rows of each feature set and applied to the validation and test rows. Listing~\ref{lst:train} shows the loop.
+
+\begin{lstlisting}[float=!htbp, caption={Model tuning and test evaluation (Step 5).}, label={lst:train}]
+MODELS = {
+  "Logistic Regression": (LogisticRegression(max_iter=1000),
+                          {"C": [0.01, 0.1, 1, 10]}),
+  "Random Forest": (RandomForestClassifier(random_state=42, n_jobs=-1),
+                    {"n_estimators": [200], "max_depth": [3, 5, 8],
+                     "min_samples_leaf": [5, 20]}),
+  "XGBoost": (XGBClassifier(eval_metric="logloss", random_state=42,
+                            n_jobs=-1),
+              {"n_estimators": [100, 300], "max_depth": [2, 3, 4],
+               "learning_rate": [0.03, 0.1]}),
+}
+
+for fs_name, cols in FEATURE_SETS.items():
+    scaler = StandardScaler().fit(train[cols])          # train only
+    X_tr, X_val, X_te = (scaler.transform(p[cols])
+                         for p in (train, val, test))
+    for m_name, (est, grid) in MODELS.items():
+        gs = GridSearchCV(est, grid, cv=TimeSeriesSplit(n_splits=3),
+                          scoring="roc_auc", n_jobs=-1)
+        gs.fit(X_tr, y_train)
+        best = gs.best_estimator_
+        proba = best.predict_proba(X_te)[:, 1]
+        pred = (proba >= 0.5).astype(int)
+        results.append({
+            "feature_set": fs_name, "model": m_name,
+            "cv_auc": gs.best_score_,
+            "val_auc": roc_auc_score(y_val, best.predict_proba(X_val)[:, 1]),
+            "accuracy": accuracy_score(y_test, pred),
+            "precision": precision_score(y_test, pred, zero_division=0),
+            "recall": recall_score(y_test, pred, zero_division=0),
+            "f1": f1_score(y_test, pred, zero_division=0),
+            "roc_auc": roc_auc_score(y_test, proba),
+            "best_params": gs.best_params_})
+\end{lstlisting}
+
+The table of nine experiments is saved as \texttt{data/results.csv}. The notebook also computes the confusion matrices and ROC curves of all nine experiments, bar charts of test accuracy and ROC-AUC per feature set (with the chance line at 0.5 and the majority baseline), the feature importance of the three multimodal models (absolute coefficients for Logistic Regression, \texttt{feature\_importances\_} for the tree models), the multimodal minus numerical-only change per model, and the 95\% margin of error of the accuracy, $1.96\sqrt{p(1-p)/n}$ with $p$ the mean accuracy of the nine experiments and $n$ the number of test days.
+
+Two further cells were added after the first results showed that most models predict Up on nearly every day. The first computes, for each of the nine fitted models, the share of test days predicted as Up and the balanced accuracy (the mean of the recall on Down days and the recall on Up days, for which 0.5 means no skill). The second produces a demonstration forecast: it selects the multimodal model with the highest \emph{validation} ROC-AUC (not the test AUC), refits it with its tuned parameters on the training and validation rows, and predicts the day after the last row of \texttt{fused.csv}. The data end on 30 June 2016, so the actual outcome is known and is printed for comparison.
+
+\section{Step 6: Live Next-Day Forecast}
+\label{sec:live}
+The sixth notebook (\texttt{tomorrow.ipynb}) shows how the pipeline can be applied to current data. It downloads about 400 calendar days of S\&P 500 prices with \texttt{yfinance}, recomputes the seven technical features with the same function as Step 2, and asserts that this function reproduces \texttt{features.csv} exactly on the 2008 to 2016 prices, so that the live features are defined identically to the training features. A Logistic Regression with $C=0.01$ (the best numerical-only setting of Step 5) and a scaler are fitted on all rows of \texttt{fused.csv}, and the probability that the next trading day closes higher is computed from the most recent row. The notebook also prints the range of probabilities the model produced on the historical days, to show how far the current value is from indifference (0.5).
+
+Only the numerical features are used. The Kaggle headline file ends in July 2016 and the project has no live headline source, so daily sentiment cannot be computed for the current date. Given that sentiment added no measurable value in Chapter~6, this restriction costs little, but it means that the forecast is made by a numerical-only model.
+
+\section{Reproducibility}
+All random seeds are fixed to 42 and every intermediate table is written to disk, so a stage can be rerun without repeating the earlier ones. In particular, the price download and the FinBERT scores are cached, which makes later runs independent of Yahoo Finance and avoids rescoring the headlines. The script \texttt{make\_results\_table.py} reads \texttt{results.csv} and produces the \LaTeX{} results table and the numerical macros used in the next chapter, so that the numbers in the report cannot drift from the numbers in the notebooks.
+
+\section{Challenges Encountered}
+The main practical difficulty was the installation of \texttt{transformers}: on an older Python 3.9 environment with an old NumPy, importing it failed with a \texttt{TypeError: 'type' object is not subscriptable}. Upgrading NumPy and restarting the kernel, pinning an older version of \texttt{transformers}, or creating a new environment with Python 3.11 resolved it. The other difficulty is the run time of the FinBERT step, which scores close to 50,000 headlines and is slow on a CPU; the resumable cache and the option of running the step on a GPU (for example on Google Colab) address this.

@@ -1,0 +1,96 @@
+\chapter{Theoretical Background}
+
+This chapter introduces the concepts on which the implementation relies: the technical indicators used as numerical features, the FinBERT model used for sentiment, the three classifiers, the notion of fusion in multimodal learning, and the evaluation metrics.
+
+\section{Numerical Features from Market Data}
+
+\subsection{Returns}
+The simple return over $k$ days is
+\begin{equation}
+r_t^{(k)} = \frac{P_t}{P_{t-k}} - 1,
+\end{equation}
+and the project uses $k=1$ (\texttt{ret\_1d}) and $k=5$ (\texttt{ret\_5d}). Returns are preferred to raw prices because prices are non-stationary: their level drifts over time, so a model trained on 2009 levels would be extrapolating when it sees 2015 levels. Returns are approximately stationary and comparable across years.
+
+\subsection{Relative Strength Index}
+The RSI~\cite{wilder1978new} measures the speed and size of recent price changes on a scale from 0 to 100. Let $U_t=\max(P_t-P_{t-1},0)$ and $D_t=\max(P_{t-1}-P_t,0)$ be the upward and downward changes. With Wilder's smoothing (an exponential moving average with $\alpha = 1/14$),
+\begin{equation}
+\mathrm{RS}_t = \frac{\mathrm{EMA}_{14}(U)_t}{\mathrm{EMA}_{14}(D)_t},
+\qquad
+\mathrm{RSI}_t = 100 - \frac{100}{1+\mathrm{RS}_t}.
+\end{equation}
+The first 14 values are undefined (the code requires a full window, \texttt{min\_periods=14}) and the corresponding rows are removed. Values above 70 are conventionally read as overbought and below 30 as oversold, although in practice the feature is simply handed to the classifier, which learns what ranges matter.
+
+\subsection{Moving Average Convergence Divergence}
+MACD tracks trend by comparing a fast and a slow exponential moving average (EMA) of the closing price:
+\begin{align}
+\mathrm{MACD}_t &= \mathrm{EMA}_{12}(P)_t - \mathrm{EMA}_{26}(P)_t,\\
+\mathrm{Signal}_t &= \mathrm{EMA}_9(\mathrm{MACD})_t,\\
+\mathrm{Hist}_t &= \mathrm{MACD}_t - \mathrm{Signal}_t.
+\end{align}
+Because the raw MACD is measured in index points and therefore grows with the price level, the project divides the MACD line and the signal line by the closing price and multiplies by 100, expressing them as percentages of the price so that they are comparable across years. The histogram is computed from these scaled series (\texttt{macd} minus \texttt{macd\_signal}).
+
+\subsection{Volume Change}
+Traded volume is a measure of participation. The feature \texttt{vol\_chg} is the relative change of volume from the previous day, $V_t/V_{t-1}-1$, which captures unusual activity without being dominated by the long-term growth in absolute volume.
+
+\section{Sentiment Analysis with FinBERT}
+
+\subsection{Transformers and BERT}
+Transformer networks process a sequence of tokens using self-attention, which lets every token weigh every other token when building its representation. BERT~\cite{devlin2019bert} is pre-trained on large text corpora with a masked-language objective, and the resulting representations can be adapted to a downstream task by adding a small output layer and fine-tuning.
+
+\subsection{FinBERT}
+FinBERT~\cite{araci2019finbert} continues the pre-training of BERT on financial text and is fine-tuned for three-class financial sentiment. For a headline $h$, it returns a probability vector
+\begin{equation}
+\big(p^{+}(h),\, p^{-}(h),\, p^{0}(h)\big), \qquad p^{+}+p^{-}+p^{0}=1,
+\end{equation}
+for the positive, negative and neutral classes. We use the probabilities rather than a hard label, since a headline with $p^{+}=0.52$ and one with $p^{+}=0.98$ carry different amounts of information, and the soft values keep it.
+
+\subsection{Daily aggregation}
+A trading day has many headlines (25 in the Kaggle dataset). For each day $d$ with headline set $H_d$, the daily sentiment features are the means
+\begin{equation}
+s^{c}_d = \frac{1}{|H_d|}\sum_{h\in H_d} p^{c}(h), \qquad c\in\{+,-,0\},
+\end{equation}
+named \texttt{sent\_pos}, \texttt{sent\_neg} and \texttt{sent\_neu} in the code.
+
+\section{Classification Models}
+
+\subsection{Logistic Regression}
+Logistic Regression models the probability of the Up class as
+\begin{equation}
+P(y=1\mid x) = \sigma(w^\top x + b) = \frac{1}{1+e^{-(w^\top x + b)}},
+\end{equation}
+and is fitted by minimising the regularised log-loss. The inverse regularisation strength $C$ controls overfitting. It is linear, fast and interpretable, since each coefficient shows the direction and strength of a feature's effect. It is expected to be a strong baseline on noisy financial data, precisely because it has little capacity to overfit.
+
+\subsection{Random Forest}
+A Random Forest~\cite{breiman2001random} is an ensemble of decision trees, each trained on a bootstrap sample of the data with a random subset of features considered at each split. Predictions are averaged across trees. Averaging reduces the variance of individual deep trees, and the model captures non-linear interactions and thresholds, such as ``RSI is high \emph{and} sentiment is negative''. The hyper-parameters tuned here are the maximum tree depth and the minimum leaf size.
+
+\subsection{XGBoost}
+XGBoost~\cite{chen2016xgboost} is an implementation of gradient-boosted decision trees. Trees are added sequentially, each fitted to the errors of the ensemble so far, with a shrinkage factor (the learning rate) and a regularised objective. It is among the most successful methods for tabular data, but also easy to overfit on small and noisy sets, so the tuning grid restricts the depth, the number of trees and the learning rate.
+
+\section{Multimodal Learning and Fusion}
+A modality is a type of data with its own structure: here, numerical time series and text. Multimodal learning combines modalities to exploit complementary information. Fusion can happen at three levels:
+\begin{itemize}
+  \item \textbf{Early (feature-level) fusion}: the feature vectors of the modalities are concatenated and fed to one model.
+  \item \textbf{Late (decision-level) fusion}: a separate model is trained per modality and their predictions are combined.
+  \item \textbf{Intermediate fusion}: the modalities are processed by separate sub-networks and merged in a hidden layer.
+\end{itemize}
+This project uses early fusion. After FinBERT has converted text to three numbers per day, both modalities are numerical vectors, so concatenation is straightforward and works with all three classifiers. The sentiment encoder (FinBERT) is used frozen as a feature extractor rather than trained, which keeps the learning problem small relative to the available number of days.
+
+\section{Evaluation Metrics}
+Let TP, TN, FP and FN be the counts in the confusion matrix, with ``Up'' as the positive class.
+\begin{align}
+\text{Accuracy} &= \frac{TP+TN}{TP+TN+FP+FN}, &
+\text{Precision} &= \frac{TP}{TP+FP},\\
+\text{Recall} &= \frac{TP}{TP+FN}, &
+F_1 &= \frac{2\cdot \text{Precision}\cdot\text{Recall}}{\text{Precision}+\text{Recall}}.
+\end{align}
+The \emph{ROC curve} plots the true-positive rate against the false-positive rate as the decision threshold varies, and the \emph{ROC-AUC} is the area under it. It equals the probability that a randomly chosen Up day receives a higher score than a randomly chosen Down day, so 0.5 means no ranking skill and 1.0 means perfect ranking. Because it does not depend on a threshold or (much) on class balance, it is the primary metric for model selection here.
+
+\subsection{Majority-class baseline and sampling error}
+A classifier that always predicts the more frequent class of the training period achieves an accuracy equal to the share of that class in the test period. Any useful model must be judged against this number. Because the test set is finite, accuracy is itself an estimate with sampling error. An approximate 95\% margin of error for an accuracy $p$ measured on $n$ days is
+\begin{equation}
+\pm\, 1.96\sqrt{\frac{p(1-p)}{n}},
+\end{equation}
+which is about $\pm 5.7$ percentage points for $p=0.5$ and $n=300$. Differences smaller than this between two models cannot be considered reliable, and the report will state this when comparing results.
+
+\section{Look-Ahead Bias and Time-Series Validation}
+\emph{Look-ahead bias} occurs when information from the future enters a model's training or features. In stock prediction it arises through several routes: a random train/test split (the model sees days adjacent to the test days), scaling with statistics computed on the full data set, features computed with a centred window, and a mismatch between when news is published and when it is assumed to be known. Standard $k$-fold cross-validation is not valid for time series for the same reason. \emph{Walk-forward} validation, implemented in scikit-learn as \texttt{TimeSeriesSplit}~\cite{pedregosa2011scikit}, trains on an initial segment and validates on the segment that follows, then extends the training segment and repeats, so that validation data always lie in the future of the training data.

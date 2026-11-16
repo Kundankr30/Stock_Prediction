@@ -1,0 +1,70 @@
+\chapter{Supplementary Material}
+
+\section{Software Environment}
+Table~\ref{tab:env} lists the software used. The notebooks were run with Python 3.13 and 3.14 (the saved outputs show 3.14 on the development machine); the exact package versions can be recorded with \texttt{pip freeze}.
+
+\begin{table}[!htbp]
+\centering
+\small
+\begin{tabular}{@{}lp{7.5cm}@{}}
+\toprule
+Component & Purpose \\
+\midrule
+Python 3.13 or later & Language \\
+pandas, numpy & Data handling \\
+yfinance & S\&P 500 daily data download \\
+transformers, torch, tqdm & FinBERT (\texttt{ProsusAI/finbert}) and progress bars \\
+scikit-learn & Scaling, Logistic Regression, Random Forest, metrics, \texttt{TimeSeriesSplit} \\
+xgboost & Gradient-boosted trees \\
+matplotlib & Figures \\
+JupyterLab or VS Code with Jupyter & Notebook environment \\
+\bottomrule
+\end{tabular}
+\caption{Software used in the project.}
+\label{tab:env}
+\end{table}
+
+\section{Project File Layout}
+\begin{lstlisting}[float=!htbp, language={}, caption={Layout of the project directory.}]
+Stock_Prediction/
+  yfinance.ipynb      features.ipynb      sentiment.ipynb
+  fusion_split.ipynb  models.ipynb        tomorrow.ipynb
+  README.md           PRESENTATION.md
+  data/
+    Combined_News_DJIA.csv      (Kaggle)
+    sp500_raw.csv     features.csv
+    headline_scores.csv  sentiment_daily.csv
+    fused.csv  train.csv  val.csv  test.csv
+    results.csv
+  report/                       (this LaTeX project)
+    main.tex  chapters/  figures/  tables/  data/
+\end{lstlisting}
+
+\section{Computing the Numbers in the Report}
+After the notebooks have been run on the real data, the report numbers are generated with the script below. It reads \texttt{results.csv} and, because \texttt{train.csv}, \texttt{val.csv} and \texttt{test.csv} are present in the same folder (\texttt{report/data/}), the split files, from which it takes the number of days and the date ranges of the three parts; it writes the results table and the numerical macros, and the report is then recompiled. If the split files are absent, the number of test days and of Up days can be passed as arguments instead. The balanced-accuracy table (Table~\ref{tab:bias}) and the two demonstration forecasts (Section~\ref{sec:forecast}) are copied from the printed output of the notebooks \texttt{models.ipynb} and \texttt{tomorrow.ipynb} and must be updated by hand if those notebooks are rerun.
+
+\begin{lstlisting}[float=!htbp, caption={Command sequence to update the report with real results.}]
+python make_results_table.py data/ tables/
+pdflatex main && bibtex main && pdflatex main && pdflatex main
+\end{lstlisting}
+
+\section{Individual Contributions}
+Table~\ref{tab:team} lists the team members and their responsibilities in the project.
+
+\begin{table}[!htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+Member & Roll & Main responsibility \\
+\midrule
+Kundan Kumar & 6 & Model training, evaluation and results \\
+Soham Mohanty & 3 & Market data and technical features \\
+Priyanshu Sekhar Badhei & 4 & News data and FinBERT sentiment \\
+Naman Verma & 2 & Fusion, alignment and leakage checks \\
+Tejash Arya & 15 & Documentation, literature review and presentation \\
+\bottomrule
+\end{tabularx}
+\caption{Team members and responsibilities (to be adjusted to the final division of work).}
+\label{tab:team}
+\end{table}
